@@ -1,4 +1,23 @@
+# Клиент векторной БД Pinecone — запись и поиск эмбеддингов памяти
 pinecone
+
+# SDK OpenAI (через OPENAI_BASE_URL / ProxyAPI) — чат, vision, эмбеддинги
 openai
+
+# Загрузка переменных из файла .env
 python-dotenv
+
+# Telegram-бот: long polling, команды, текст, отправка фото
 pyTelegramBotAPI
+
+# Фреймворк Haystack: Agent, тулы, эмбеддеры, Document
+haystack-ai
+
+# Интеграция Haystack ↔ Pinecone (PineconeDocumentStore, retriever)
+pinecone-haystack
+
+# HTTP-клиент для внешних API (dog.ceo, dogapi.dog) и OpenAI с trust_env=False
+httpx
+
+# Логирование анализа изображений (dogImageAnalyzerTool / vision)
+loguru
