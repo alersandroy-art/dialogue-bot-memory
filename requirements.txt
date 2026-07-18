@@ -21,3 +21,10 @@ httpx
 
 # Логирование анализа изображений (dogImageAnalyzerTool / vision)
 loguru
+
+# Docling + интеграция с Haystack (парсинг PDF/DOCX и чанкинг для hay_v2_bot)
+docling
+docling-haystack
+
+# Токенизатор для HybridChunker (без скачивания моделей Hugging Face)
+tiktoken

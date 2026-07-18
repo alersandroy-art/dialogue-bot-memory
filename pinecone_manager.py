@@ -28,7 +28,9 @@ from pinecone import Pinecone
 COSINE_SIMILARITY_THRESHOLD = 0.85
 
 # Префикс namespace для изоляции памяти каждого пользователя Telegram.
+# Формат: user_{telegram_id}. Общий/default namespace для диалогов не используется.
 USER_NAMESPACE_PREFIX = "user_"
+FORBIDDEN_SHARED_NAMESPACES = frozenset({"", "default", "shared", "common"})
 
 MemoryDuplicateAction = Literal["skip", "update"]
 MemoryAction = Literal["saved", "skipped", "updated"]
@@ -118,9 +120,11 @@ class PineconeManager:
     @staticmethod
     def build_user_namespace(telegram_id: str | int) -> str:
         """
-        Формирует namespace для памяти конкретного пользователя Telegram.
+        Формирует персональный namespace пользователя Telegram.
 
         Пример: telegram_id=12345 → "user_12345".
+        Каждый пользователь работает только в своём namespace —
+        чужая память недоступна.
 
         Args:
             telegram_id: Идентификатор пользователя в Telegram.
@@ -129,12 +133,25 @@ class PineconeManager:
             Имя namespace вида user_{telegram_id}.
 
         Raises:
-            ValueError: Если telegram_id пустой.
+            ValueError: Если telegram_id пустой или недопустимый.
         """
+        if telegram_id is None:
+            raise ValueError(
+                "telegram_id обязателен: каждый пользователь работает "
+                "в своём namespace Pinecone.",
+            )
         user_id = str(telegram_id).strip()
         if not user_id:
             raise ValueError("telegram_id не может быть пустым.")
-        return f"{USER_NAMESPACE_PREFIX}{user_id}"
+        if user_id.lower() in FORBIDDEN_SHARED_NAMESPACES:
+            raise ValueError(
+                f"Недопустимый telegram_id={user_id!r}: "
+                "это имя общего namespace.",
+            )
+        namespace = f"{USER_NAMESPACE_PREFIX}{user_id}"
+        if namespace.lower() in FORBIDDEN_SHARED_NAMESPACES:
+            raise ValueError(f"Запрещён общий namespace: {namespace}")
+        return namespace
 
     def _resolve_user_namespace(
         self,
@@ -340,34 +357,27 @@ class PineconeManager:
         user_{telegram_id}. Сравнение на дубликаты выполняется только
         внутри памяти этого пользователя.
 
-        Перед записью сравнивает текст с уже сохранёнными фрагментами:
-        - низкое сходство → новая информация, создаётся новый слот памяти;
-        - высокое сходство → дубликат/вариация, пропуск или обновление.
-
-        Args:
-            text: Текст для запоминания.
-            telegram_id: ID пользователя Telegram (рекомендуется).
-            memory_id: ID нового фрагмента. Если не указан — генерируется UUID.
-            metadata: Дополнительные метаданные (role, timestamp и т.д.).
-            namespace: Явный namespace (если telegram_id не передан).
-            metadata_filter: Дополнительный фильтр при поиске дубликатов.
-            text_field: Поле metadata для хранения текста.
-            on_duplicate: Действие при высоком сходстве: "skip" или "update".
-            similarity_threshold: Порог сходства. По умолчанию — глобальная
-                константа COSINE_SIMILARITY_THRESHOLD.
-
-        Returns:
-            Словарь с результатом:
-            - action: "saved" | "skipped" | "updated";
-            - namespace: namespace пользователя;
-            - memory_id: id сохранённого или найденного фрагмента;
-            - similarity: сходство с ближайшим фрагментом;
-            - message: пояснение на русском языке.
+        Для изоляции пользователей передавайте telegram_id (рекомендуется).
         """
+        if telegram_id is None and not namespace:
+            raise ValueError(
+                "Укажите telegram_id, чтобы сохранить память в личный "
+                "namespace пользователя (user_{telegram_id}).",
+            )
         user_namespace = self._resolve_user_namespace(
             telegram_id=telegram_id,
             namespace=namespace,
         )
+        if not user_namespace.startswith(USER_NAMESPACE_PREFIX):
+            raise ValueError(
+                f"Namespace {user_namespace!r} не персональный: "
+                f"ожидался префикс {USER_NAMESPACE_PREFIX!r}.",
+            )
+        if user_namespace.lower() in FORBIDDEN_SHARED_NAMESPACES:
+            raise ValueError(
+                f"Запрещено писать память пользователей в общий "
+                f"namespace {user_namespace!r}.",
+            )
         if telegram_id is not None:
             metadata = self._enrich_user_metadata(metadata, telegram_id)
 

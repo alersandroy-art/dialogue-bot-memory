@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 # Порог косинусного сходства: выше — дубликат/вариация, ниже — новая память.
 COSINE_SIMILARITY_THRESHOLD = 0.85
+
+# Каждый пользователь Telegram — отдельный namespace Pinecone.
+# Формат: hay_user_{telegram_id} (не пересекается с базовым ботом user_{id}).
 USER_NAMESPACE_PREFIX = "hay_user_"
+FORBIDDEN_SHARED_NAMESPACES = frozenset({"", "default", "shared", "common"})
+
 EMBEDDING_DIMENSION = 1536  # text-embedding-3-small
 
 
@@ -82,30 +87,65 @@ class HaystackPineconeMemory:
             )
 
     @staticmethod
-    def build_user_namespace(telegram_id: str | int) -> str:
-        """Namespace вида hay_user_{telegram_id}."""
+    def _require_telegram_id(telegram_id: str | int) -> str:
+        """
+        Валидирует Telegram user id.
+
+        Память пользователей нельзя писать в общий namespace —
+        всегда нужен персональный идентификатор.
+        """
+        if telegram_id is None:
+            raise ValueError(
+                "telegram_id обязателен: каждый пользователь работает "
+                "в своём namespace Pinecone.",
+            )
         user_id = str(telegram_id).strip()
         if not user_id:
             raise ValueError("telegram_id не может быть пустым.")
-        return f"{USER_NAMESPACE_PREFIX}{user_id}"
+        if user_id.lower() in FORBIDDEN_SHARED_NAMESPACES:
+            raise ValueError(
+                f"Недопустимый telegram_id={user_id!r}: "
+                "это имя общего namespace.",
+            )
+        return user_id
+
+    @classmethod
+    def build_user_namespace(cls, telegram_id: str | int) -> str:
+        """
+        Персональный namespace пользователя: hay_user_{telegram_id}.
+
+        Пример: telegram_id=12345 → \"hay_user_12345\".
+        Другие пользователи в этот namespace не попадают.
+        """
+        user_id = cls._require_telegram_id(telegram_id)
+        namespace = f"{USER_NAMESPACE_PREFIX}{user_id}"
+        if namespace.lower() in FORBIDDEN_SHARED_NAMESPACES:
+            raise ValueError(f"Запрещён общий namespace: {namespace}")
+        if not namespace.startswith(USER_NAMESPACE_PREFIX):
+            raise ValueError(
+                f"Namespace {namespace!r} должен начинаться с "
+                f"{USER_NAMESPACE_PREFIX!r}.",
+            )
+        return namespace
 
     def get_document_store(self, telegram_id: str | int) -> PineconeDocumentStore:
         """
-        Возвращает PineconeDocumentStore для пользователя.
+        PineconeDocumentStore, привязанный к namespace этого пользователя.
 
-        Как в примере интеграции: index + metric=cosine + dimension.
+        Изоляция: index общий, namespace = hay_user_{telegram_id}.
         """
         namespace = self.build_user_namespace(telegram_id)
         if namespace not in self._stores:
             logger.info(
-                "[memory.get_document_store] create store index=%s namespace=%s "
-                "metric=cosine dimension=%s",
+                "[memory] isolation: create store index=%s namespace=%s "
+                "(personal for telegram_id=%s) metric=cosine dimension=%s",
                 self._index_name,
                 namespace,
+                telegram_id,
                 self._dimension,
             )
             try:
-                self._stores[namespace] = PineconeDocumentStore(
+                store = PineconeDocumentStore(
                     index=self._index_name,
                     namespace=namespace,
                     metric="cosine",
@@ -120,7 +160,20 @@ class HaystackPineconeMemory:
                     namespace,
                 )
                 raise
-            logger.info("[memory.get_document_store] store created namespace=%s", namespace)
+
+            # Контроль: store действительно смотрит в личный namespace.
+            store_ns = getattr(store, "namespace", namespace)
+            if store_ns != namespace:
+                raise RuntimeError(
+                    f"PineconeDocumentStore.namespace={store_ns!r}, "
+                    f"ожидался личный {namespace!r}.",
+                )
+            self._stores[namespace] = store
+            logger.info(
+                "[memory] user isolation ok | telegram_id=%s namespace=%s",
+                telegram_id,
+                namespace,
+            )
         return self._stores[namespace]
 
     def recall(

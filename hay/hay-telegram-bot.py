@@ -186,6 +186,8 @@ class HaystackAssistantBot:
         text = (
             f"Привет, <b>{user.first_name or 'друг'}</b>!\n\n"
             "Я персональный помощник на Haystack Agent с памятью в Pinecone.\n"
+            f"Твоя память изолирована в namespace "
+            f"<code>{self.memory.build_user_namespace(user.id)}</code>.\n\n"
             "Я запоминаю наш диалог и могу пользоваться инструментами:\n"
             "• случайный факт о собаках\n"
             "• случайная картинка собаки + описание породы (vision)\n\n"
@@ -198,6 +200,9 @@ class HaystackAssistantBot:
             "<b>Справка</b>\n\n"
             "В векторной базе Pinecone сохраняется <b>только текст</b> "
             "твоих сообщений. Ответы бота не пишутся.\n\n"
+            "Каждый пользователь Telegram работает в <b>своём</b> "
+            "namespace Pinecone (<code>hay_user_&lt;telegram_id&gt;</code>) — "
+            "память других людей тебе недоступна.\n\n"
             "Примеры:\n"
             "• «Запомни, что меня зовут Алекс и я люблю кофе»\n"
             "• «Расскажи факт о собаках»\n"
